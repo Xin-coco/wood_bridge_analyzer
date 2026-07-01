@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+.DS_Store
+
+# Generated analysis outputs
+outputs/
+outputs_*/
+outputs-*/
+
+# Local manual override files can contain project-specific decisions.
+manual_member_overrides.csv
+manual_node_overrides.csv
+
+# Runtime/cache files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

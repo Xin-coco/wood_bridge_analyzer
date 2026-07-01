@@ -1,0 +1,108 @@
+model:
+  scale: 10.0
+  unit: "mm"
+  rod_layer_keywords: []
+  node_cluster_tolerance_model_mm: 5.0
+  endpoint_cluster_tolerance_model_mm: 5.0
+  min_rod_length_model_mm: 20.0
+
+solver_backend: both
+
+opensees:
+  element_type: truss
+  ndm: 3
+  ndf: 3
+  geometric_transformation: linear
+  use_corotational_truss: false
+  material:
+    E_MPa: 10000.0
+    area_mm2: 2400.0
+    density_kg_per_m3: 500.0
+  section:
+    width_mm: 30.0
+    height_mm: 80.0
+  analysis:
+    load_cases:
+      - self_weight
+      - midspan_person
+      - group_uniform
+      - eccentric_walk
+    displacement_limit_mm: 500.0
+
+fixed_nodes: []
+roller_nodes: []
+deck_nodes: []
+
+manual_overrides:
+  support_nodes:
+    fixed: []
+    roller: []
+  deck_nodes: []
+  ignored_members: []
+  force_include_members: []
+
+conservative_factors:
+  connection_slip_factor: 1.2
+  construction_error_factor: 1.15
+  material_uncertainty_factor: 1.15
+  buckling_safety_factor: 1.5
+
+sanity:
+  max_condition_number: 1000000000000.0
+
+material_count:
+  saw_kerf_mm: 3.0
+  trim_allowance_mm: 5.0
+  allow_splicing: true
+  manual_member_overrides_csv: "manual_member_overrides.csv"
+  user_manual_count: 46
+
+centerline_model:
+  manual_node_overrides_csv: "manual_node_overrides.csv"
+
+materials:
+  wood_density_kg_m3: 500.0
+  elastic_modulus_mpa: 10000.0
+  allowable_tension_mpa: 8.0
+  allowable_compression_mpa: 6.0
+  rod_mass_kg: 1.5
+
+section:
+  width_mm: 30.0
+  height_mm: 80.0
+  standard_length_mm: 1300.0
+
+bridge:
+  target_span_mm: 3900.0
+  target_span_tolerance_mm: 250.0
+  min_deck_width_mm: 650.0
+  max_deck_width_mm: 1300.0
+  max_deflection_mm: 500.0
+  base_rod_count: 60
+  deck_z_range_mm: null
+  deck_y_range_mm: null
+  deck_node_filter:
+    node_ids: null
+    x_range_mm: null
+    y_range_mm: null
+    z_range_mm: null
+
+loads:
+  gravity_m_s2: 9.81
+  include_self_weight: true
+  central_person_count: 1
+  distributed_person_count: 9
+  person_mass_kg: 70.0
+  eccentric_side: "positive_y"
+  moving_person_count: 1
+  moving_steps: 15
+
+supports:
+  auto_detect: true
+  fixed_nodes: []
+  roller_nodes: []
+  manual: []
+
+visualization:
+  deflection_scale: 20.0
+  dpi: 180
