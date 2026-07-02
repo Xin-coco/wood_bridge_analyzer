@@ -84,6 +84,7 @@ material_stock_counting:
     trim_allowance_mm: 0
   manual_compare:
     manual_stock_count: 46
+    prefer_manual_stock_count: true
   scoring:
     base_stock_count: 60
     base_score: 20

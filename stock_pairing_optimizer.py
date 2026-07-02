@@ -170,7 +170,10 @@ def optimize_pairing(rounded_df: pd.DataFrame, config: dict[str, Any]) -> tuple[
 
     plan = pd.DataFrame(stock_rows)
     counted_plan = plan[plan["pairing_type"] != "ignored"].copy()
-    stock_count = int(counted_plan["stock_id"].replace("", pd.NA).dropna().astype(int).nunique()) if not counted_plan.empty else 0
+    program_stock_count = int(counted_plan["stock_id"].replace("", pd.NA).dropna().astype(int).nunique()) if not counted_plan.empty else 0
+    manual_stock_count = cfg["manual_stock_count"]
+    use_manual_stock_count = bool(cfg["prefer_manual_stock_count"] and manual_stock_count > 0)
+    stock_count = int(manual_stock_count if use_manual_stock_count else program_stock_count)
     paired_count = int(counted_plan["pairing_type"].isin(["paired_exact", "paired_under_target"]).sum())
     single_count = int(counted_plan["pairing_type"].isin(["single_full_length", "single_unpaired"]).sum())
     waste_values = pd.to_numeric(counted_plan["waste_mm"], errors="coerce").dropna()
@@ -182,21 +185,25 @@ def optimize_pairing(rounded_df: pd.DataFrame, config: dict[str, Any]) -> tuple[
             unpaired_members.extend([int(x) for x in str(item).split(";") if str(x).strip()])
     summary = {
         "model_member_count": int(len(rounded_df)),
+        "structural_member_count": int(len(usable)),
         "effective_wood_segment_count": int(len(usable)),
         "included_member_count": int(usable["include_in_stock_count"].sum()) if not usable.empty else 0,
         "rounded_length_type_count": int(usable["rounded_length_mm"].nunique()) if not usable.empty else 0,
         "paired_stock_count": paired_count,
         "single_stock_count": single_count,
         "oversized_member_count": int(len(oversized_rows)),
+        "program_stock_wood_count": program_stock_count,
         "stock_wood_count": stock_count,
-        "manual_stock_count": cfg["manual_stock_count"],
-        "stock_count_difference_vs_manual": stock_count - cfg["manual_stock_count"],
+        "manual_stock_count": manual_stock_count,
+        "stock_count_source": "manual_review" if use_manual_stock_count else "program_pairing",
+        "stock_count_difference_vs_manual": program_stock_count - manual_stock_count,
+        "model_vs_stock_difference": int(len(rounded_df)) - stock_count,
         "raw_material_score": raw_score,
         "capped_material_score": capped_score,
         "score_policy_note": "capped at base score" if cfg["cap_score_at_20"] else "raw score not capped",
         "total_waste_mm": float(waste_values.sum()) if not waste_values.empty else 0.0,
         "average_waste_mm": float(waste_values.mean()) if not waste_values.empty else 0.0,
-        "pair_success_rate": float(paired_count / max(stock_count, 1)),
+        "pair_success_rate": float(paired_count / max(program_stock_count, 1)),
         "unpaired_member_ids": unpaired_members,
         "oversized_member_ids": [int(row["member_id"]) for row in oversized_rows],
         "recommended_to_use": bool(stock_count > 0),

@@ -86,7 +86,9 @@ def write_reinforcement_priority(
                 ]
             )
         lines.append("")
-    lines.append(f"当前等效标准杆数量为 {rod_summary['equivalent_standard_count']}，材料成本分为 {rod_summary['material_score']}。")
+    lines.append(
+        f"当前模型木杆构件为 {rod_summary['model_rod_count']} 段，最终按 {rod_summary.get('stock_wood_count', rod_summary['equivalent_standard_count'])} 根标准木杆计材料分，材料成本分为 {rod_summary['material_score']}。"
+    )
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -107,7 +109,7 @@ def write_board_text(
         f"本桥采用单跨木桁架逻辑，实桥估计跨度 {geom['span_mm']:.0f}mm、宽度 {geom['width_mm']:.0f}mm。模型按三维铰接桁架计算，杆件仅承受轴力。控制工况为 {governing.name}，理想最大竖向位移 {governing.max_vertical_displacement_mm:.2f}mm，保守修正后约 {conservative['conservative_max_displacement_mm']:.2f}mm。计算结果显示结构主要风险集中在压杆侧向稳定、桥面平面拉结和中跨下弦受力。",
         "",
         "## 100字材料统计说明",
-        f"程序识别模型杆件 {rod_summary['model_rod_count']} 根，经 1300mm 标准杆排料后需领取 {stock_count} 根。任务书基准为 60 根，当前原始材料成本分估算为 {material_score}。超长杆件为 {rod_summary['overlength_ids'] or '无'}，后续应优先检查拼接位置和节点板可靠性。",
+        f"程序识别模型木杆构件 {rod_summary['model_rod_count']} 段，最终按 {stock_count} 根 1300mm 标准木杆计材料分。任务书基准为 60 根，当前原始材料成本分估算为 {material_score}。超长杆件为 {rod_summary['overlength_ids'] or '无'}，后续应优先检查拼接位置和节点板可靠性。",
         "",
         "## 100字受力路径说明",
         f"竖向荷载经桥面节点传入上下弦和斜撑，支座反力与总荷载差异约 {validation_summary['vertical_error_ratio']:.1%}。最大压杆区域判断为 {validation_summary['max_compression_zone']}，最大拉杆区域判断为 {validation_summary['max_tension_zone']}。这说明模型受力路径基本可读，但若存在奇异刚度或高条件数，仍需核对节点汇交与支座设置。",
@@ -127,8 +129,8 @@ def comparison_rows(old: dict[str, Any], new: dict[str, Any]) -> list[dict[str, 
         return {"metric": name, "old": old_value, "new": new_value, "delta": delta}
 
     return [
-        metric("模型杆件数量", old["rod_summary"]["model_rod_count"], new["rod_summary"]["model_rod_count"]),
-        metric("等效标准杆数量", old["rod_summary"]["equivalent_standard_count"], new["rod_summary"]["equivalent_standard_count"]),
+        metric("模型杆件段数", old["rod_summary"]["model_rod_count"], new["rod_summary"]["model_rod_count"]),
+        metric("标准木杆领取数量", old["rod_summary"].get("stock_wood_count", old["rod_summary"]["equivalent_standard_count"]), new["rod_summary"].get("stock_wood_count", new["rod_summary"]["equivalent_standard_count"])),
         metric("最大位移_mm", old["governing"].max_vertical_displacement_mm, new["governing"].max_vertical_displacement_mm),
         metric("最大受压杆", old["validation_summary"].get("max_compression_member"), new["validation_summary"].get("max_compression_member")),
         metric("最大受拉杆", old["validation_summary"].get("max_tension_member"), new["validation_summary"].get("max_tension_member")),

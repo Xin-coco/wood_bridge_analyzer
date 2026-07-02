@@ -60,6 +60,7 @@ def material_stock_config(config: dict[str, Any]) -> dict[str, Any]:
         "saw_kerf_mm": float(cutting_loss.get("saw_kerf_mm", 3.0)),
         "trim_allowance_mm": float(cutting_loss.get("trim_allowance_mm", 0.0)),
         "manual_stock_count": int(manual.get("manual_stock_count", 46)),
+        "prefer_manual_stock_count": bool(manual.get("prefer_manual_stock_count", True)),
         "base_stock_count": int(scoring.get("base_stock_count", 60)),
         "base_score": float(scoring.get("base_score", 20.0)),
         "cap_score_at_20": bool(scoring.get("cap_score_at_20", False)),

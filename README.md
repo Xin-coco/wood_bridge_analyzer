@@ -341,6 +341,7 @@ material_stock_counting:
     max_pieces_per_stock: 2
   manual_compare:
     manual_stock_count: 46
+    prefer_manual_stock_count: true
 ```
 
 运行示例：
@@ -359,6 +360,8 @@ python main.py --model 桁架桥3.3dm --config config.yaml --output outputs --en
 - `length_rounding_distribution.png`、`stock_pairing_plan.png`、`material_stock_count_summary.png`。
 
 当程序统计和人工统计差异较大时，应优先复核是否有非结构杆件被计入、重复杆件未排除、超长杆件未拆分，或是否需要允许每根标准木杆裁切三段以上。
+
+注意：`model_member_count` 是模型中的木杆构件段数，`stock_wood_count` 是最终用于材料成本分的 1300mm 标准木杆领取数量。两者不是同一个统计口径。有人工复核数量时，默认用 `manual_stock_count` 作为最终 `stock_wood_count`，程序排料结果会保存在 `program_stock_wood_count` 中用于核对。
 
 ## TODO
 

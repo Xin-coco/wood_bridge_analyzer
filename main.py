@@ -51,6 +51,7 @@ from sanity_check import run_sanity_checks
 from solver_comparison import compare_solvers
 from stock_count_report import (
     stock_summary_report_lines,
+    write_material_count_comparison_v21,
     write_material_stock_json,
     write_material_stock_summary,
     write_paired_cut_plan_markdown,
@@ -317,6 +318,7 @@ def run_v21_material_stock_counting(output_dir: Path, config: dict[str, Any], ma
     write_paired_cut_plan_markdown(output_dir / "paired_stock_cut_plan.md", plan)
     write_material_stock_summary(output_dir / "material_stock_summary.md", stock_summary)
     write_material_stock_json(output_dir / "material_stock_summary.json", stock_summary)
+    write_material_count_comparison_v21(output_dir / "material_count_comparison.md", stock_summary)
     failures = create_stock_count_visualizations(rounded, plan, stock_summary, output_dir, config)
 
     material_summary["v16_stock_wood_count"] = material_summary.get("stock_wood_count")
@@ -435,14 +437,16 @@ def write_report(
         f"- fem_result_score: {confidence_breakdown['fem_result_score']}/100",
         "",
         "## 木杆统计",
-        f"- model_member_count（3dm 识别杆状构件）: {rod_summary['model_rod_count']}",
-        f"- structural_member_count（用于排料统计的有效构件）: {material_summary['structural_member_count']}",
-        f"- stock_wood_count（实际需领取 1300mm 标准木杆）: {material_summary['stock_wood_count']}",
+        f"- 模型识别杆件段数 model_member_count: {rod_summary['model_rod_count']} 段",
+        f"- 有效结构木杆段数 structural_member_count: {material_summary['structural_member_count']} 段",
+        f"- 长度近似后参与排料杆件: {v21_stock_summary.get('included_member_count', material_summary['structural_member_count'])} 段",
+        f"- 程序排料后标准木杆数量 program_stock_wood_count: {v21_stock_summary.get('program_stock_wood_count', material_summary['stock_wood_count'])} 根",
+        f"- 人工复核标准木杆数量 manual_stock_count: {material_summary['user_manual_count']} 根",
+        f"- 最终标准木杆使用数量 stock_wood_count: {material_summary['stock_wood_count']} 根",
         f"- 程序原始等效标准杆: {rod_summary['equivalent_standard_count']}",
-        f"- 用户人工统计: {material_summary['user_manual_count']}",
         f"- raw_material_score: {material_summary['raw_material_score']}",
         f"- capped_material_score: {material_summary['capped_material_score']}",
-        f"- 材料成本分建议采用: stock_wood_count = {material_summary['stock_wood_count']}",
+        "- 材料成本分按标准木杆使用数量 stock_wood_count 计算，不按模型杆件段数计算。",
         f"- 60 根限制: {'超过' if material_summary['stock_wood_count'] > rod_summary['base_count'] else '未超过'}",
         f"- 超长杆件 ID: {rod_summary['overlength_ids'] or '无'}",
         f"- 短杆件 ID: {rod_summary['short_ids'] or '无'}",
@@ -450,10 +454,11 @@ def write_report(
         f"- 人工修正表: {material_summary['manual_overrides_csv_used']}",
         "",
         "## V1.6.1 材料统计修正说明",
+        "- 模型杆件段数不等于标准木杆使用数量。程序识别的 66 段表示桥体中的构件段数，人工统计的约 46 根表示经过裁切排料后需要领取的 1300mm 标准木杆数量。材料成本分应以后者为准。",
         "- 任务书材料评分应使用 stock_wood_count，而不是 model_member_count。",
         "- 原始等效标准杆按每个模型构件单独折算，会把多段短杆各算成一根标准木杆，因此会高估用料。",
         "- cut_plan.csv / cut_plan.md 已按 1300mm 标准木杆、锯缝和预留量进行 first-fit decreasing 排料。",
-        f"- 差异对照: 程序原始识别 {rod_summary['model_rod_count']} 根；程序原始等效标准杆 {rod_summary['equivalent_standard_count']} 根；用户人工统计 {material_summary['user_manual_count']} 根；修正后 stock_wood_count {material_summary['stock_wood_count']} 根。",
+        f"- 差异对照: 程序原始识别 {rod_summary['model_rod_count']} 段；程序原始等效标准杆 {rod_summary['equivalent_standard_count']} 根；程序排料后标准木杆 {v21_stock_summary.get('program_stock_wood_count', material_summary['stock_wood_count'])} 根；人工复核 {material_summary['user_manual_count']} 根；最终采用 stock_wood_count {material_summary['stock_wood_count']} 根。",
         "- 最终建议：材料成本分采用 stock_wood_count；如果课程材料分上限为 20，则展示 capped_material_score。",
     ]
     lines.extend(stock_summary_report_lines(v21_stock_summary))
@@ -577,7 +582,7 @@ def write_report(
         lines.append(f"- P{item['priority']} {item['topic']}: {item['suggestion']} 目标: {item['target'] or '无明显目标'}")
     panel_summary = (
         f"本桥模型按 1:{metadata.scale:g} 换算为实桥进行三维铰接桁架分析，实桥估计跨度 {geom['span_mm']:.0f}mm、宽度 {geom['width_mm']:.0f}mm。"
-        f"程序识别模型杆件 {rod_summary['model_rod_count']} 根，排料后需领取标准木杆 {material_summary['stock_wood_count']} 根，原始材料分 {material_summary['raw_material_score']}。"
+        f"程序识别模型木杆构件 {rod_summary['model_rod_count']} 段，最终按 {material_summary['stock_wood_count']} 根 1300mm 标准木杆计材料分，原始材料分 {material_summary['raw_material_score']}。"
         f"控制工况为 {governing.name}，理想最大竖向位移 {governing.max_vertical_displacement_mm:.2f}mm，保守修正后约 {conservative['conservative_max_displacement_mm']:.2f}mm。"
         f"最危险杆件为 member {_row_value(max_risk, 'member_id')}。建议优先复核节点连接、桥面 X 形拉结、上弦压杆侧向约束和中跨下弦加强。"
         "该结果基于简化轴力桁架模型，连接滑移、施工误差和材料缺陷仍需实体加载试验修正。"
@@ -870,7 +875,7 @@ def main() -> None:
     config = apply_cli_overrides(load_config(args.config), args)
     primary = analyze_model(args.model, config, output_dir, label="primary")
     print(f"分析完成。输出目录: {output_dir.resolve()}")
-    print(f"识别模型杆件: {primary['rod_summary']['model_rod_count']} 根；排料后标准木杆: {primary['material_summary']['stock_wood_count']} 根")
+    print(f"识别模型杆件段数: {primary['rod_summary']['model_rod_count']} 段；最终标准木杆: {primary['material_summary']['stock_wood_count']} 根")
     print(f"控制工况: {primary['governing'].name}；最大竖向位移: {primary['governing'].max_vertical_displacement_mm:.3f} mm")
 
     if args.compare_model:
