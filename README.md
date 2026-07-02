@@ -317,6 +317,49 @@ conservative_factors:
   buckling_safety_factor: 1.5
 ```
 
+## V2.1 标准木杆近似排料
+
+V2.1 新增标准木杆近似长度排料统计，只影响材料统计和材料成本分，不会修改 `clean_members.csv` 的真实杆长，也不会影响 numpy FEM 或 OpenSeesPy 的结构计算。
+
+程序优先读取 `corrected_rod_inventory.csv`；如果该文件不存在，则读取 `clean_members.csv`。只统计 `member_type = wood` 的有效木杆，排除绳索、金属节点、支座标记、加载标记、辅助线和非结构对象。
+
+默认设置为：
+
+```yaml
+material_stock_counting:
+  enabled: true
+  stock:
+    stock_length_mm: 1300
+  length_rounding:
+    enabled: true
+    method: nearest
+    step_mm: 50
+  pairing:
+    enabled: true
+    target_length_mm: 1300
+    pair_tolerance_mm: 25
+    max_pieces_per_stock: 2
+  manual_compare:
+    manual_stock_count: 46
+```
+
+运行示例：
+
+```bash
+python main.py --model 桁架桥3.3dm --config config.yaml --output outputs --enable-stock-pairing --round-step 50 --pair-tolerance 25 --manual-stock-count 46
+```
+
+新增输出：
+
+- `rounded_member_lengths.csv`：每根有效木杆的真实长度、近似长度和取整误差；
+- `paired_stock_cut_plan.csv`：每根 1300mm 标准木杆的裁切组合；
+- `paired_stock_cut_plan.md`：中文裁切方案；
+- `material_stock_summary.md` / `material_stock_summary.json`：最终标准木杆数量、人工统计对比和材料成本分；
+- `oversized_members.csv`：超过 1300mm、需要拆分或重新设计的构件；
+- `length_rounding_distribution.png`、`stock_pairing_plan.png`、`material_stock_count_summary.png`。
+
+当程序统计和人工统计差异较大时，应优先复核是否有非结构杆件被计入、重复杆件未排除、超长杆件未拆分，或是否需要允许每根标准木杆裁切三段以上。
+
 ## TODO
 
 - 更精确地从 Rhino Brep/Extrusion 中提取任意方向杆件中心线；

@@ -45,9 +45,18 @@ from fix_suggestions import generate_fix_suggestions, write_fix_suggestions
 from opensees_backend import run_opensees_backend
 from opensees_exporter import deck_nodes_from_config, opensees_requested, support_nodes_from_config
 from opensees_postprocess import create_opensees_visualizations
+from material_length_rounding import load_material_members, material_stock_config, rounded_member_lengths
 from rod_counter import inventory_dataframe, summarize_rods, write_inventory_summary
 from sanity_check import run_sanity_checks
 from solver_comparison import compare_solvers
+from stock_count_report import (
+    stock_summary_report_lines,
+    write_material_stock_json,
+    write_material_stock_summary,
+    write_paired_cut_plan_markdown,
+)
+from stock_count_visualization import create_stock_count_visualizations
+from stock_pairing_optimizer import optimize_pairing
 from validation_check import REVIEW_WARNING, run_validation_checks
 from v17_reports import (
     comparison_rows,
@@ -62,6 +71,24 @@ from visualization import create_visualizations, plot_comparison_summary
 def load_config(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def apply_cli_overrides(config: dict[str, Any], args: Any) -> dict[str, Any]:
+    stock_cfg = config.setdefault("material_stock_counting", {})
+    rounding = stock_cfg.setdefault("length_rounding", {})
+    pairing = stock_cfg.setdefault("pairing", {})
+    manual = stock_cfg.setdefault("manual_compare", {})
+    if getattr(args, "enable_stock_pairing", False):
+        stock_cfg["enabled"] = True
+        pairing["enabled"] = True
+        rounding["enabled"] = True
+    if getattr(args, "round_step", None) is not None:
+        rounding["step_mm"] = float(args.round_step)
+    if getattr(args, "pair_tolerance", None) is not None:
+        pairing["pair_tolerance_mm"] = float(args.pair_tolerance)
+    if getattr(args, "manual_stock_count", None) is not None:
+        manual["manual_stock_count"] = int(args.manual_stock_count)
+    return config
 
 
 def log_step(message: str) -> None:
@@ -277,6 +304,37 @@ def opensees_report_lines(opensees_result: Any, comparison_summary: dict[str, An
     return lines
 
 
+def run_v21_material_stock_counting(output_dir: Path, config: dict[str, Any], material_summary: dict[str, Any], rod_summary: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    cfg = material_stock_config(config)
+    if not cfg["enabled"]:
+        return {}, []
+    members = load_material_members(output_dir)
+    rounded = rounded_member_lengths(members, config)
+    rounded, plan, oversized, stock_summary = optimize_pairing(rounded, config)
+    rounded.to_csv(output_dir / "rounded_member_lengths.csv", index=False)
+    plan.to_csv(output_dir / "paired_stock_cut_plan.csv", index=False)
+    oversized.to_csv(output_dir / "oversized_members.csv", index=False)
+    write_paired_cut_plan_markdown(output_dir / "paired_stock_cut_plan.md", plan)
+    write_material_stock_summary(output_dir / "material_stock_summary.md", stock_summary)
+    write_material_stock_json(output_dir / "material_stock_summary.json", stock_summary)
+    failures = create_stock_count_visualizations(rounded, plan, stock_summary, output_dir, config)
+
+    material_summary["v16_stock_wood_count"] = material_summary.get("stock_wood_count")
+    material_summary["v16_raw_material_score"] = material_summary.get("raw_material_score")
+    material_summary["v16_capped_material_score"] = material_summary.get("capped_material_score")
+    material_summary["stock_wood_count"] = stock_summary["stock_wood_count"]
+    material_summary["raw_material_score"] = stock_summary["raw_material_score"]
+    material_summary["capped_material_score"] = stock_summary["capped_material_score"]
+    material_summary["score_policy_note"] = stock_summary["score_policy_note"]
+    material_summary["user_manual_count"] = stock_summary["manual_stock_count"]
+    material_summary["v21_material_stock_summary_json"] = str(output_dir / "material_stock_summary.json")
+    rod_summary["stock_wood_count"] = stock_summary["stock_wood_count"]
+    rod_summary["raw_material_score"] = stock_summary["raw_material_score"]
+    rod_summary["capped_material_score"] = stock_summary["capped_material_score"]
+    rod_summary["material_score"] = stock_summary["raw_material_score"]
+    return stock_summary, failures
+
+
 def write_report(
     output_dir: Path,
     model_path: Path,
@@ -310,6 +368,8 @@ def write_report(
     opensees_result: Any,
     solver_comparison_summary: dict[str, Any],
     opensees_visualization_failures: list[str],
+    v21_stock_summary: dict[str, Any],
+    v21_visualization_failures: list[str],
     fem_ran: bool,
     config: dict[str, Any],
 ) -> None:
@@ -395,6 +455,11 @@ def write_report(
         "- cut_plan.csv / cut_plan.md 已按 1300mm 标准木杆、锯缝和预留量进行 first-fit decreasing 排料。",
         f"- 差异对照: 程序原始识别 {rod_summary['model_rod_count']} 根；程序原始等效标准杆 {rod_summary['equivalent_standard_count']} 根；用户人工统计 {material_summary['user_manual_count']} 根；修正后 stock_wood_count {material_summary['stock_wood_count']} 根。",
         "- 最终建议：材料成本分采用 stock_wood_count；如果课程材料分上限为 20，则展示 capped_material_score。",
+    ]
+    lines.extend(stock_summary_report_lines(v21_stock_summary))
+    if v21_visualization_failures:
+        lines.append(f"- V2.1 图像生成问题: {v21_visualization_failures}")
+    lines.extend([
         "",
         "## 超长杆件处理",
         "",
@@ -427,7 +492,7 @@ def write_report(
         f"- 屈曲风险最高杆件: member {_row_value(max_risk, 'member_id')}，risk {float(max_risk.iloc[0]['risk_score']) if not max_risk.empty else 0:.3f}",
         f"- 最危险移动荷载位置: span ratio {float(moving_worst.iloc[0]['position_ratio']) if not moving_worst.empty else 0:.2f}",
         f"- 最危险荷载工况: {governing.name}",
-    ]
+    ])
     lines.extend(opensees_report_lines(opensees_result, solver_comparison_summary, opensees_visualization_failures, config))
     lines.extend([
         "",
@@ -586,6 +651,9 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
     pd.DataFrame(diagnostics["close_unclustered_endpoints"]).to_csv(output_dir / "close_unclustered_endpoints.csv", index=False)
     geom = geometry_checks(model, rods, config)
 
+    log_step(f"[{label}] 执行 V2.1 标准木杆近似长度排料统计")
+    v21_stock_summary, v21_visualization_failures = run_v21_material_stock_counting(output_dir, config, material_summary, rod_summary)
+
     log_step(f"[{label}] 检查支座和桥面加载节点是否已人工确认")
     manual_ready, support_load_info = manual_fem_inputs_confirmed(config)
     supports = resolve_supports(model, config) if manual_ready else []
@@ -743,6 +811,8 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         opensees_result,
         solver_comparison_summary,
         opensees_visualization_failures,
+        v21_stock_summary,
+        v21_visualization_failures,
         fem_ready,
         config,
     )
@@ -776,6 +846,7 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         "opensees_result": opensees_result,
         "solver_comparison_df": solver_comparison_df,
         "solver_comparison_summary": solver_comparison_summary,
+        "v21_stock_summary": v21_stock_summary,
         "fem_ran": fem_ready,
     }
 
@@ -786,13 +857,17 @@ def main() -> None:
     parser.add_argument("--compare-model", default=None, help="Optional second Rhino .3dm model for before/after comparison")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--output", default="outputs", help="Output directory")
+    parser.add_argument("--enable-stock-pairing", action="store_true", help="Enable V2.1 approximate stock pairing material count")
+    parser.add_argument("--round-step", type=float, default=None, help="Length rounding step in mm for V2.1 stock pairing")
+    parser.add_argument("--pair-tolerance", type=float, default=None, help="Pair tolerance in mm for V2.1 stock pairing")
+    parser.add_argument("--manual-stock-count", type=int, default=None, help="Manual stock count for comparison in V2.1 report")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_step("读取配置")
-    config = load_config(args.config)
+    config = apply_cli_overrides(load_config(args.config), args)
     primary = analyze_model(args.model, config, output_dir, label="primary")
     print(f"分析完成。输出目录: {output_dir.resolve()}")
     print(f"识别模型杆件: {primary['rod_summary']['model_rod_count']} 根；排料后标准木杆: {primary['material_summary']['stock_wood_count']} 根")

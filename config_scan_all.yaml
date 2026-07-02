@@ -57,6 +57,38 @@ material_count:
   manual_member_overrides_csv: "manual_member_overrides.csv"
   user_manual_count: 46
 
+material_stock_counting:
+  enabled: true
+  stock:
+    stock_length_mm: 1300
+    stock_width_mm: 30
+    stock_height_mm: 80
+  length_rounding:
+    enabled: true
+    method: nearest
+    step_mm: 50
+    tolerance_mm: 25
+    keep_original_length: true
+  pairing:
+    enabled: true
+    target_length_mm: 1300
+    pair_tolerance_mm: 25
+    allow_under_target: true
+    allow_over_target: false
+    max_pieces_per_stock: 2
+    prefer_exact_pair: true
+    prefer_min_waste: true
+  cutting_loss:
+    consider_saw_kerf: false
+    saw_kerf_mm: 3
+    trim_allowance_mm: 0
+  manual_compare:
+    manual_stock_count: 46
+  scoring:
+    base_stock_count: 60
+    base_score: 20
+    cap_score_at_20: false
+
 centerline_model:
   manual_node_overrides_csv: "manual_node_overrides.csv"
 
