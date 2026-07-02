@@ -363,6 +363,27 @@ python main.py --model 桁架桥3.3dm --config config.yaml --output outputs --en
 
 注意：`model_member_count` 是模型中的木杆构件段数，`stock_wood_count` 是最终用于材料成本分的 1300mm 标准木杆领取数量。两者不是同一个统计口径。有人工复核数量时，默认用 `manual_stock_count` 作为最终 `stock_wood_count`，程序排料结果会保存在 `program_stock_wood_count` 中用于核对。
 
+## V2.2 结构问题诊断与修改建议
+
+V2.2 在每次分析结束后读取已有输出文件，生成“模型问题诊断 + 修改建议”。它是后处理模块，不修改 OpenSeesPy、numpy FEM 或中心线结构长度。
+
+运行示例：
+
+```bash
+python main.py --model 桁架桥3.3dm --config config.yaml --output outputs --generate-diagnosis --generate-fix-suggestions --diagnosis-top-n 10
+```
+
+新增输出：
+
+- `structural_diagnosis.json`：所有问题的结构化数据；
+- `structural_diagnosis.md`：中文诊断报告；
+- `fix_suggestions.md` / `fix_suggestions.csv`：按优先级整理的修改建议；
+- `model_test_summary.md`：当前模型测试结果摘要；
+- `board_structure_advice.md`：适合 A1 展板的结构建议文字；
+- `problem_map_3views.png`、`fix_suggestion_map.png`、`priority_ranking.png`、`before_after_expected_effect.png`。
+
+诊断模块会标记 `critical`、`high`、`medium`、`low` 四类严重程度。若求解器结果不可用或支座/荷载未确认，报告会优先提示“分析结果需要复核”，不会把不可靠位移和杆力当作承重结论。
+
 ## TODO
 
 - 更精确地从 Rhino Brep/Extrusion 中提取任意方向杆件中心线；

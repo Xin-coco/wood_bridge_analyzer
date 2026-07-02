@@ -90,6 +90,11 @@ material_stock_counting:
     base_score: 20
     cap_score_at_20: false
 
+structural_diagnosis:
+  enabled: true
+  generate_fix_suggestions: true
+  top_n: 10
+
 centerline_model:
   manual_node_overrides_csv: "manual_node_overrides.csv"
 

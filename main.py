@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
+
+_cache_root = Path(tempfile.gettempdir()) / "wood_bridge_analyzer_cache"
+_cache_root.mkdir(parents=True, exist_ok=True)
+(_cache_root / "matplotlib").mkdir(parents=True, exist_ok=True)
+(_cache_root / "xdg").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("MPLCONFIGDIR", str(_cache_root / "matplotlib"))
+os.environ.setdefault("XDG_CACHE_HOME", str(_cache_root / "xdg"))
 
 try:
     import numpy as np
@@ -42,6 +51,15 @@ from fem_truss_solver import (
     run_standard_cases,
 )
 from fix_suggestions import generate_fix_suggestions, write_fix_suggestions
+from fix_suggestion_report import (
+    diagnosis_report_lines,
+    write_board_structure_advice,
+    write_fix_suggestions_outputs,
+    write_model_test_summary,
+    write_structural_diagnosis_json,
+    write_structural_diagnosis_markdown,
+)
+from fix_suggestion_visualization import create_fix_suggestion_visualizations
 from opensees_backend import run_opensees_backend
 from opensees_exporter import deck_nodes_from_config, opensees_requested, support_nodes_from_config
 from opensees_postprocess import create_opensees_visualizations
@@ -58,6 +76,7 @@ from stock_count_report import (
 )
 from stock_count_visualization import create_stock_count_visualizations
 from stock_pairing_optimizer import optimize_pairing
+from structural_diagnosis import run_structural_diagnosis
 from validation_check import REVIEW_WARNING, run_validation_checks
 from v17_reports import (
     comparison_rows,
@@ -89,6 +108,14 @@ def apply_cli_overrides(config: dict[str, Any], args: Any) -> dict[str, Any]:
         pairing["pair_tolerance_mm"] = float(args.pair_tolerance)
     if getattr(args, "manual_stock_count", None) is not None:
         manual["manual_stock_count"] = int(args.manual_stock_count)
+    diagnosis_cfg = config.setdefault("structural_diagnosis", {})
+    if getattr(args, "generate_diagnosis", False):
+        diagnosis_cfg["enabled"] = True
+    if getattr(args, "generate_fix_suggestions", False):
+        diagnosis_cfg["enabled"] = True
+        diagnosis_cfg["generate_fix_suggestions"] = True
+    if getattr(args, "diagnosis_top_n", None) is not None:
+        diagnosis_cfg["top_n"] = int(args.diagnosis_top_n)
     return config
 
 
@@ -335,6 +362,31 @@ def run_v21_material_stock_counting(output_dir: Path, config: dict[str, Any], ma
     rod_summary["capped_material_score"] = stock_summary["capped_material_score"]
     rod_summary["material_score"] = stock_summary["raw_material_score"]
     return stock_summary, failures
+
+
+def run_v22_structural_diagnosis(output_dir: Path, config: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    diagnosis_cfg = config.get("structural_diagnosis", {}) or {}
+    if not bool(diagnosis_cfg.get("enabled", True)):
+        return {}, []
+    top_n = int(diagnosis_cfg.get("top_n", 10))
+    diagnosis = run_structural_diagnosis(output_dir, config, top_n=top_n)
+    write_structural_diagnosis_json(output_dir / "structural_diagnosis.json", diagnosis)
+    write_structural_diagnosis_markdown(output_dir / "structural_diagnosis.md", diagnosis)
+    write_fix_suggestions_outputs(output_dir, diagnosis)
+    write_model_test_summary(output_dir / "model_test_summary.md", diagnosis)
+    write_board_structure_advice(output_dir / "board_structure_advice.md", diagnosis)
+    visualization_failures = create_fix_suggestion_visualizations(output_dir, diagnosis, config, top_n)
+    if visualization_failures:
+        diagnosis["visualization_failures"] = visualization_failures
+        write_structural_diagnosis_json(output_dir / "structural_diagnosis.json", diagnosis)
+    report_path = output_dir / "analysis_report.md"
+    if report_path.exists():
+        with open(report_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(diagnosis_report_lines(diagnosis)))
+            if visualization_failures:
+                f.write("\n- V2.2 图像生成问题: " + str(visualization_failures))
+            f.write("\n")
+    return diagnosis, visualization_failures
 
 
 def write_report(
@@ -821,6 +873,8 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         fem_ready,
         config,
     )
+    log_step(f"[{label}] 生成 V2.2 结构问题诊断与修改建议")
+    structural_diagnosis, diagnosis_visualization_failures = run_v22_structural_diagnosis(output_dir, config)
     return {
         "model_path": Path(model_path),
         "output_dir": output_dir,
@@ -852,6 +906,8 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         "solver_comparison_df": solver_comparison_df,
         "solver_comparison_summary": solver_comparison_summary,
         "v21_stock_summary": v21_stock_summary,
+        "structural_diagnosis": structural_diagnosis,
+        "diagnosis_visualization_failures": diagnosis_visualization_failures,
         "fem_ran": fem_ready,
     }
 
@@ -866,6 +922,9 @@ def main() -> None:
     parser.add_argument("--round-step", type=float, default=None, help="Length rounding step in mm for V2.1 stock pairing")
     parser.add_argument("--pair-tolerance", type=float, default=None, help="Pair tolerance in mm for V2.1 stock pairing")
     parser.add_argument("--manual-stock-count", type=int, default=None, help="Manual stock count for comparison in V2.1 report")
+    parser.add_argument("--generate-diagnosis", action="store_true", help="Generate V2.2 structural diagnosis report")
+    parser.add_argument("--generate-fix-suggestions", action="store_true", help="Generate V2.2 prioritized fix suggestions")
+    parser.add_argument("--diagnosis-top-n", type=int, default=None, help="Number of top V2.2 issues to include in report")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
