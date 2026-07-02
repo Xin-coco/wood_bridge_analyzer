@@ -50,6 +50,14 @@ from fem_truss_solver import (
     resolve_supports,
     run_standard_cases,
 )
+from fem_reliability_check import (
+    create_fem_reliability_visualizations,
+    evaluate_fem_reliability,
+    fem_reliability_report_lines,
+    write_fem_reliability_json,
+    write_fem_reliability_report,
+    write_repair_actions,
+)
 from fix_suggestions import generate_fix_suggestions, write_fix_suggestions
 from fix_suggestion_report import (
     diagnosis_report_lines,
@@ -389,6 +397,17 @@ def run_v22_structural_diagnosis(output_dir: Path, config: dict[str, Any]) -> tu
     return diagnosis, visualization_failures
 
 
+def write_fem_reliability_outputs(output_dir: Path, config: dict[str, Any], result: dict[str, Any]) -> list[str]:
+    write_fem_reliability_json(output_dir / "fem_reliability_summary.json", result)
+    write_fem_reliability_report(output_dir / "fem_reliability_report.md", result)
+    write_repair_actions(output_dir / "repair_actions.md", result)
+    failures = create_fem_reliability_visualizations(output_dir, result, config)
+    if failures:
+        result["visualization_failures"] = failures
+        write_fem_reliability_json(output_dir / "fem_reliability_summary.json", result)
+    return failures
+
+
 def write_report(
     output_dir: Path,
     model_path: Path,
@@ -540,12 +559,13 @@ def write_report(
         f"- V1.6.3 FEM 前置验收: {'已通过' if fem_ran else '未通过；本次不进行可靠 FEM 计算'}",
         "",
         "## 有限元分析结果",
+        "- 结果口径: " + ("已通过前置可靠性检查，可作为结构判断输入。" if fem_ran else "FEM 可靠性未通过；以下位移、杆力和反力仅供排查，不作为最终受力结论。"),
         f"- 控制工况: {governing.name}",
         f"- 求解状态: {'成功' if governing.success else '不可解或需复核'}；{governing.message}",
-        f"- 最大位移: {governing.max_vertical_displacement_mm:.3f} mm，限值 {max_deflection_limit:.1f} mm，结果: {'超过' if governing.max_vertical_displacement_mm > max_deflection_limit else '未超过'}",
-        f"- 最大受拉杆: member {_row_value(max_tension, 'member_id')}，轴力 {float(max_tension.iloc[0]['axial_force_n']) if not max_tension.empty else 0:.2f} N",
-        f"- 最大受压杆: member {_row_value(max_compression, 'member_id')}，轴力 {float(max_compression.iloc[0]['axial_force_n']) if not max_compression.empty else 0:.2f} N",
-        f"- 最大节点反力: {governing.max_reaction_n:.2f} N",
+        f"- {'最大位移' if fem_ran else '排查用最大位移'}: {governing.max_vertical_displacement_mm:.3f} mm，限值 {max_deflection_limit:.1f} mm，结果: {'超过' if governing.max_vertical_displacement_mm > max_deflection_limit else '未超过/未形成正式结论'}",
+        f"- {'最大受拉杆' if fem_ran else '排查用最大受拉杆'}: member {_row_value(max_tension, 'member_id')}，轴力 {float(max_tension.iloc[0]['axial_force_n']) if not max_tension.empty else 0:.2f} N",
+        f"- {'最大受压杆' if fem_ran else '排查用最大受压杆'}: member {_row_value(max_compression, 'member_id')}，轴力 {float(max_compression.iloc[0]['axial_force_n']) if not max_compression.empty else 0:.2f} N",
+        f"- {'最大节点反力' if fem_ran else '排查用最大节点反力'}: {governing.max_reaction_n:.2f} N",
         f"- 屈曲风险最高杆件: member {_row_value(max_risk, 'member_id')}，risk {float(max_risk.iloc[0]['risk_score']) if not max_risk.empty else 0:.3f}",
         f"- 最危险移动荷载位置: span ratio {float(moving_worst.iloc[0]['position_ratio']) if not moving_worst.empty else 0:.2f}",
         f"- 最危险荷载工况: {governing.name}",
@@ -554,12 +574,14 @@ def write_report(
     lines.extend([
         "",
         "## 保守修正结果",
+        "- 说明: " + ("基于可靠 FEM 结果。" if fem_ran else "FEM 可靠性未通过，保守修正值仅用于排查流程，不作为正式结构结论。"),
         f"- 理想最大位移: {conservative['ideal_max_displacement_mm']:.3f} mm；保守最大位移: {conservative['conservative_max_displacement_mm']:.3f} mm",
         f"- 理想最大杆力: {conservative['ideal_max_abs_force_n']:.2f} N；保守最大杆力: {conservative['conservative_max_abs_force_n']:.2f} N",
         f"- 理想最大屈曲利用率: {conservative['ideal_max_buckling_utilization']:.3f}；保守最大屈曲利用率: {conservative['conservative_max_buckling_utilization']:.3f}",
         f"- 修正系数: 位移 x{conservative['displacement_factor']:.2f}，杆力 x{conservative['force_factor']:.2f}，屈曲 x{conservative['buckling_factor']:.2f}",
         "",
         "## 结果合理性检查",
+        "- 说明: " + ("用于验证已通过的 FEM 结果。" if fem_ran else "当前 FEM 未通过可靠性检查，此处只说明为什么需要复核。"),
         f"- 总竖向荷载: {sanity_summary['total_vertical_load_n']:.2f} N；竖向反力合计: {sanity_summary['total_vertical_reaction_n']:.2f} N；差异: {sanity_summary['balance_ratio']:.1%}",
         f"- 最大位移节点: {sanity_summary['max_displacement_node']}；跨向位置 ratio: {sanity_summary['max_displacement_x_ratio']}",
         f"- 最大压杆区域判断: {sanity_summary['max_compression_zone']}；最大拉杆区域判断: {sanity_summary['max_tension_zone']}",
@@ -743,6 +765,11 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
     centerline_score = score_centerline_model(metadata, centerline_validation, support_check_summary, deck_check_summary, material_summary, precheck_summary)
     pd.DataFrame([centerline_score]).to_csv(output_dir / "centerline_model_score.csv", index=False)
     write_centerline_validation_report(output_dir / "centerline_validation_report.md", centerline_validation, centerline_components, precheck_summary, centerline_score)
+    log_step(f"[{label}] 执行 FEM 可靠性检查")
+    fem_reliability = evaluate_fem_reliability(output_dir, config)
+    fem_reliability_visualization_failures = write_fem_reliability_outputs(output_dir, config, fem_reliability)
+    if fem_reliability["fem_reliability_status"] not in {"reliable", "needs_review"}:
+        fem_ready = False
 
     if fem_ready:
         supports = resolve_supports(model, config)
@@ -794,6 +821,8 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
             solver_comparison_df, solver_comparison_summary = compare_solvers(results, opensees_result, output_dir)
     else:
         log_step(f"[{label}] solver_backend=numpy，跳过 OpenSeesPy backend")
+    fem_reliability = evaluate_fem_reliability(output_dir, config, opensees_result=opensees_result)
+    fem_reliability_visualization_failures = write_fem_reliability_outputs(output_dir, config, fem_reliability)
 
     log_step(f"[{label}] 执行结果验证、合理性检查和保守修正")
     sanity_df, sanity_summary = run_sanity_checks(model, governing, config, deck_node_ids)
@@ -873,6 +902,11 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         fem_ready,
         config,
     )
+    with open(output_dir / "analysis_report.md", "a", encoding="utf-8") as f:
+        f.write("\n".join(fem_reliability_report_lines(fem_reliability)))
+        if fem_reliability_visualization_failures:
+            f.write("\n- FEM 可靠性图像生成问题: " + str(fem_reliability_visualization_failures))
+        f.write("\n")
     log_step(f"[{label}] 生成 V2.2 结构问题诊断与修改建议")
     structural_diagnosis, diagnosis_visualization_failures = run_v22_structural_diagnosis(output_dir, config)
     return {
@@ -906,6 +940,8 @@ def analyze_model(model_path: str | Path, config: dict[str, Any], output_dir: Pa
         "solver_comparison_df": solver_comparison_df,
         "solver_comparison_summary": solver_comparison_summary,
         "v21_stock_summary": v21_stock_summary,
+        "fem_reliability": fem_reliability,
+        "fem_reliability_visualization_failures": fem_reliability_visualization_failures,
         "structural_diagnosis": structural_diagnosis,
         "diagnosis_visualization_failures": diagnosis_visualization_failures,
         "fem_ran": fem_ready,

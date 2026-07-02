@@ -104,6 +104,10 @@ def _load_inputs(output_dir: Path) -> tuple[dict[str, Any], list[str]]:
     data["solver_comparison"] = comparison
     if warning and not (output_dir / "solver_comparison.md").exists():
         warnings.append(warning)
+    fem_reliability, warning = _read_json(output_dir / "fem_reliability_summary.json")
+    data["fem_reliability"] = fem_reliability
+    if warning:
+        warnings.append(warning)
     return data, warnings
 
 
@@ -192,6 +196,30 @@ def _diagnose_nodes(data: dict[str, Any], issues: list[dict[str, Any]], priority
 
 
 def _diagnose_analysis_results(data: dict[str, Any], issues: list[dict[str, Any]], priority: int, displacement_limit_mm: float) -> int:
+    fem_rel = data.get("fem_reliability") or {}
+    if fem_rel and fem_rel.get("fem_reliability_status") != "reliable":
+        reasons = fem_rel.get("reasons", [])
+        affected_nodes: list[int] = []
+        affected_members: list[int] = []
+        for reason in reasons:
+            affected_nodes.extend(int(x) for x in reason.get("affected_nodes", [])[:10])
+            affected_members.extend(int(x) for x in reason.get("affected_members", [])[:10])
+        issues.append(
+            _issue(
+                "A-001",
+                "fem_not_reliable",
+                sorted(set(affected_nodes))[:30],
+                sorted(set(affected_members))[:30],
+                {
+                    "fem_reliability_status": fem_rel.get("fem_reliability_status"),
+                    "reason_count": fem_rel.get("reason_count"),
+                    "reasons": [item.get("message") for item in reasons[:8]],
+                },
+                "FEM 可靠性检查未通过，当前位移、杆力和支座反力只能用于排查，不能作为正式结构结论。",
+                priority,
+            )
+        )
+        return priority + 1
     load_cases = data["load_cases"]
     if load_cases.empty or not bool(load_cases.get("success", pd.Series([False])).astype(bool).any()):
         issues.append(
